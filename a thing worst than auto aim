@@ -1,0 +1,57 @@
+var base = Module.findBaseAddress("libg.so");
+
+var getClosestTarget = new NativeFunction(base.add(0x69D564), 'pointer', ['pointer', 'pointer', 'int32', 'char', 'char', 'pointer', 'char', 'char', 'int32']);
+var getMoveAngle = new NativeFunction(base.add(0x8AA070), 'float', ['pointer']);
+var getMoveSpeed = new NativeFunction(base.add(0x8AA900), 'int', ['pointer', 'pointer']);
+var getCharacterData = new NativeFunction(base.add(0x8A7D08), 'pointer', ['pointer']);
+var getCollisionRadius = new NativeFunction(base.add(0x83FF0C), 'uint32', ['pointer']);
+var getX = new NativeFunction(base.add(0x8D1CC0), 'uint32', ['pointer']);
+var getY = new NativeFunction(base.add(0x8D1CC8), 'uint32', ['pointer']);
+var getBattle = new NativeFunction(base.add(0x7BB850), 'pointer', []);
+var activateSkill = base.add(0x68E060);
+
+var target = null;
+var predicted = { x: 0, y: 0 };
+var Me = ptr(0);
+
+Interceptor.attach(base.add(0x9652B0), {
+    onEnter(args) {
+        var bm = args[0];
+        if (!bm || bm.isNull()) return;
+        Me = new NativeFunction(base.add(0x966E58), "pointer", ["pointer"])(bm);
+    }
+});
+
+Interceptor.attach(getClosestTarget, {
+    onLeave(retval) {
+        if (retval.isNull()) return;
+        target = retval;
+        var data = getCharacterData(target);
+        if (data.isNull() || Me.isNull()) return;
+        var angle = getMoveAngle(target);
+        var speed = getMoveSpeed(target, data);
+        var radius = getCollisionRadius(data);
+        var x = getX(target);
+        var y = getY(target);
+        var ox = getX(Me);
+        var oy = getY(Me);
+        predicted.x = x + Math.cos(angle) * speed;
+        predicted.y = y + Math.sin(angle) * speed;
+        if (radius > 0) {
+            var dx = predicted.x - ox;
+            var dy = predicted.y - oy;
+            var len = Math.hypot(dx, dy);
+            predicted.x -= dx / len * radius;
+            predicted.y -= dy / len * radius;
+        }
+    }
+});
+
+Interceptor.attach(activateSkill, {
+    onEnter(args) {
+        if (args[6].toInt32() === 0 || Me.isNull() || !target) return;
+        args[1] = ptr(Math.round(predicted.x));
+        args[2] = ptr(Math.round(predicted.y));
+        console.log("[+] Shooting to (" + predicted.x.toFixed(0) + ", " + predicted.y.toFixed(0) + ")");
+    }
+});
